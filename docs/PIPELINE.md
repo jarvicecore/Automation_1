@@ -58,6 +58,13 @@ dev ──► qa ──► stage ──► uat ──► prod ──► train
 | **prod** | Promotion PR from uat | `@release-managers` + `@security`, plus a 10-minute wait timer |
 | **train** | Promotion PR from prod | `@release-managers` + `@training` |
 
+> **This repo is currently in solo mode.** It lives on a personal account, which
+> cannot have teams, so the approver for every gated environment is `@jarvicecore`
+> and the bootstrap runs as `./scripts/bootstrap-github.ps1 -Solo`. The approval
+> gate is still real and still enforced — you approve each environment explicitly
+> before it deploys. The table above is the enterprise target state; the README
+> details exactly what solo mode relaxes and what it keeps.
+
 `dev` deliberately has no manifest file. It always runs the latest release, by
 definition, so recording that in git would mean pushing to `main` from CI —
 which would require punching a bypass hole in branch protection to buy a fact we
@@ -128,11 +135,12 @@ Applied by `scripts/bootstrap-github.ps1`:
 ## Setup
 
 ```powershell
-# 1. Edit the team names at the top of the script to match your org.
-#    Then preview:
-./scripts/bootstrap-github.ps1 -DryRun
+# Solo (this repo today): you are the only approver.
+./scripts/bootstrap-github.ps1 -Solo -DryRun
+./scripts/bootstrap-github.ps1 -Solo
 
-# 2. Apply.
+# Enterprise: first edit the team names at the top of the script to match your org.
+./scripts/bootstrap-github.ps1 -DryRun
 ./scripts/bootstrap-github.ps1
 ```
 

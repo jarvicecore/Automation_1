@@ -103,11 +103,11 @@ Read this before you start — some of it is already done.
 | `CODEQL_LANGUAGES_JSON` | ✅ set to `["actions","python"]` |
 | Reference app + six-environment Docker rig | ✅ real and working — `./scripts/demo.sh` |
 | `build.sh` / `test.sh` / `smoke-test.sh` | ✅ real (deterministic packaging, pytest, provenance + contract checks) |
-| **GitHub teams for CODEOWNERS** | ❌ **not created — this will block every PR** |
-| `bootstrap-github.ps1` | ❌ not run yet |
+| CODEOWNERS | ✅ **solo mode** — everything owned by `@jarvicecore`; enterprise team mapping preserved, commented, in-file |
+| `bootstrap-github.ps1` | ❌ not run yet — run it with **`-Solo`** ([why](#why-solo-mode-exists-and-what-it-costs)) |
 | Promotion GitHub App | ❌ not created — promotion PRs get **no checks** until it is |
 | Snyk / SonarQube | ❌ off (flag-gated; pipeline is green without them) |
-| `deploy.sh` | ⚠️ real for the Docker rig; **stub for your real target** — see [step 7](#7-point-deploysh-at-your-real-target) |
+| `deploy.sh` | ⚠️ real for the Docker rig; **stub for your real target** — see [step 6](#6-point-deploysh-at-your-real-target) |
 
 ---
 
@@ -161,58 +161,69 @@ a special emergency path nobody has rehearsed.
 
 ## Setup, in order
 
-**The order matters. Doing step 3 before step 1 will lock you out of your own repo.**
+This repo is currently configured for **solo mode** — `jarvicecore` is a personal
+account, and personal accounts cannot have teams. [CODEOWNERS](.github/CODEOWNERS)
+assigns everything to `@jarvicecore`, and the enterprise team mapping is preserved,
+commented out, at the bottom of that file.
 
-### 1. Create the teams (do this first)
-
-[.github/CODEOWNERS](.github/CODEOWNERS) requires review from six teams. **If they
-don't exist when you enable the ruleset, every pull request — including promotion
-PRs — becomes unmergeable, because GitHub cannot resolve the required reviewer.**
-
-Either create them in your org:
-
-```text
-platform-engineering    qa                  business-owners
-security                release-managers    training
-```
-
-…or, if you're testing solo, edit [.github/CODEOWNERS](.github/CODEOWNERS) and the
-`$Teams` block at the top of
-[scripts/bootstrap-github.ps1](scripts/bootstrap-github.ps1) to point at your own
-username:
-
-```text
-*   @your-handle
-```
-
-The bootstrap script *warns* rather than crashes on a team it can't find — but the
-environment gate for that team is then left **wide open**. Don't ignore the warnings.
-
-### 2. Merge PR #1
+### 1. Merge PR #1
 
 ```powershell
 gh pr merge 1 --squash
 ```
 
-Do this *before* enabling the ruleset, or you'll need approvals you can't give
-yourself.
+Do this **before** enabling the ruleset.
 
-### 3. Run the bootstrap
+### 2. Run the bootstrap
 
 Applies everything that makes the pipeline non-optional: the branch ruleset, the six
-environments and their reviewer gates, the read-only default token, the actions
+environments and their approval gates, the read-only default token, the actions
 allow-list, and the promotion labels.
 
 ```powershell
-./scripts/bootstrap-github.ps1 -DryRun   # preview, changes nothing
-./scripts/bootstrap-github.ps1           # apply
+./scripts/bootstrap-github.ps1 -Solo -DryRun   # preview, changes nothing
+./scripts/bootstrap-github.ps1 -Solo           # apply
 ```
 
-Idempotent — re-run it any time you change team names. Calls that need a feature your
-plan lacks (GitHub Advanced Security, rulesets on private repos) *warn* rather than
-abort.
+Idempotent. Calls needing a feature your plan lacks warn rather than abort.
 
-### 4. Create the promotion GitHub App
+#### Why solo mode exists, and what it costs
+
+**GitHub will not let you approve your own pull request.** Three of the enterprise
+controls therefore deadlock a single-operator repo — every PR, including every
+promotion PR, would be permanently unmergeable:
+
+| Control | Enterprise | `-Solo` |
+| --- | --- | --- |
+| Required approving reviews | 2 | **0** |
+| Code-owner review | required | **not required** |
+| `prevent_self_review` on environments | on | **off** — you approve your own deploys |
+| Signed commits | required | **not required** |
+
+Everything else is **unchanged and fully enforced**:
+
+- Pull request required to reach `main`. No direct pushes, no force-push, no deletion.
+- `ci-passed` must be green — build, 11 tests, CodeQL, dependency review.
+- Code-scanning alert threshold blocks merges.
+- Linear history, squash-only.
+- **Every environment past dev still needs your explicit approval before it deploys.**
+- Prod still has its 10-minute wait timer.
+- Artifact digest + SLSA provenance verified at promote *and* deploy.
+- Read-only default token, actions allow-list, deploys only from `main`.
+
+So you still click through a real approval gate six times. You just aren't blocked by
+a second reviewer who doesn't exist.
+
+**Going enterprise later:** move the repo to an org, create the six teams, swap the
+commented block at the bottom of [CODEOWNERS](.github/CODEOWNERS), and re-run the
+bootstrap **without** `-Solo`. It applies
+[rulesets/main.json](.github/rulesets/main.json) instead of
+[main-solo.json](.github/rulesets/main-solo.json). Nothing else changes.
+
+Running the bootstrap **without** `-Solo` on a personal account is detected and warns
+you loudly rather than half-applying a broken config.
+
+### 3. Create the promotion GitHub App
 
 **Do not skip this.** GitHub deliberately does not trigger workflows on PRs opened
 with the default `GITHUB_TOKEN`. Without an App token, promotion PRs open with **zero
@@ -228,14 +239,14 @@ entire model.
    - Variable `PROMOTION_APP_ID` = the App's ID
    - Secret `PROMOTION_APP_PRIVATE_KEY` = the full `.pem` contents
 
-### 5. Turn on the commercial scanners
+### 4. Turn on the commercial scanners
 
 Snyk and SonarQube are wired but **skipped** until you switch them on. A *skipped*
 scanner catches nothing. See [configuration surface](#configuration-surface) for the
 variables. Also update `sonar.projectKey` in
 [sonar-project.properties](sonar-project.properties).
 
-### 6. Configure each environment
+### 5. Configure each environment
 
 Settings → Environments → *(dev, qa, stage, uat, prod, train)* → add `EXTRACT_TARGET`
 and optionally `ENVIRONMENT_URL`.
@@ -244,7 +255,7 @@ The deploy job already has `id-token: write`. **Prefer OIDC federation and skip
 `EXTRACT_CREDENTIALS` entirely** — a long-lived secret across six environments is six
 places to leak it from.
 
-### 7. Point `deploy.sh` at your real target
+### 6. Point `deploy.sh` at your real target
 
 The reference app in [src/app/](src/app/) is a real, working service. Keep it until
 your own extracts are ready — it costs nothing and keeps the gates exercised.
@@ -388,7 +399,7 @@ jobs you add.
 | `ENABLE_SNYK` | *(unset)* | `true` turns the Snyk job on. |
 | `ENABLE_SONAR` | *(unset)* | `true` turns the SonarQube job on. |
 | `SONAR_HOST_URL` | *(unset)* | Your SonarQube server. |
-| `PROMOTION_APP_ID` | *(unset)* | GitHub App ID for promotion PRs. **[Step 4](#4-create-the-promotion-github-app).** |
+| `PROMOTION_APP_ID` | *(unset)* | GitHub App ID for promotion PRs. **[Step 3](#3-create-the-promotion-github-app).** |
 
 **Repository secrets:**
 
@@ -583,8 +594,8 @@ by policy documents.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Every PR blocked, nobody can approve | CODEOWNERS names a team that doesn't exist | Create the teams, or point CODEOWNERS at real handles. **[Step 1](#1-create-the-teams-do-this-first).** |
-| Promotion PR has **no checks at all** | Promotion GitHub App not configured | **[Step 4](#4-create-the-promotion-github-app).** Until then, promotion PRs merge unverified. |
+| Every PR blocked, nobody can approve | Enterprise ruleset applied to a solo repo — you cannot approve your own PR | Re-run `./scripts/bootstrap-github.ps1 -Solo`. See [why solo mode exists](#why-solo-mode-exists-and-what-it-costs). |
+| Promotion PR has **no checks at all** | Promotion GitHub App not configured | **[Step 3](#3-create-the-promotion-github-app).** Until then, promotion PRs merge unverified. |
 | `Dependency review is not supported on this repository` | Dependency graph disabled | Enable Dependabot alerts. *(Already done here — but this is what bit us first.)* |
 | PR blocked on `ci-passed` that never ran | CI hasn't reported on this repo yet | Expected on a fresh repo. That's the gate working, not a bug. |
 | `$'\r': command not found` on a runner | A `.sh` file got CRLF endings | [.gitattributes](.gitattributes) prevents this. Don't remove it. |
@@ -592,7 +603,7 @@ by policy documents.
 | Deploy fails on digest mismatch | The release asset changed after promotion was approved | **Working as designed.** Someone replaced the artifact. |
 | `/version` returns 409 | Running bytes ≠ promoted digest | **Working as designed.** The service is refusing to vouch for itself. |
 | Promote fails: *"nothing to promote"* | Target already runs that tag, or source is empty | Not an error. Refusing a no-op PR. |
-| Snyk/Sonar show as **skipped** | Flag-gated, not enabled | **[Step 5](#5-turn-on-the-commercial-scanners).** Skipped ≠ passing. |
+| Snyk/Sonar show as **skipped** | Flag-gated, not enabled | **[Step 4](#4-turn-on-the-commercial-scanners).** Skipped ≠ passing. |
 | `demo.sh`: *"environment is not running"* | Rig isn't up | `docker compose up -d --build` |
 | Node 20 deprecation warnings | Upstream actions haven't bumped yet | Cosmetic. Dependabot will pick it up. |
 

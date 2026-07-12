@@ -42,13 +42,31 @@
 [CmdletBinding()]
 param(
     [string] $Repo,
-    [switch] $DryRun
+    [switch] $DryRun,
+
+    # Solo mode: you are the only human.
+    #
+    # GitHub will not let you approve your own pull request, and personal accounts
+    # cannot have teams. So the enterprise settings -- 2 approvals, code-owner
+    # review, prevent_self_review -- would deadlock a single-operator repo: every
+    # PR, including every promotion PR, would be permanently unmergeable.
+    #
+    # -Solo therefore:
+    #   * makes YOU the required reviewer on every gated environment
+    #   * sets prevent_self_review = false, so you can approve your own deploys
+    #   * applies rulesets/main-solo.json (0 approvals, no code-owner review)
+    #
+    # Everything else -- required status checks, the actions allow-list, the
+    # read-only token, no force-push, deploy-only-from-main -- is UNCHANGED.
+    # You still click through a real approval gate for every environment.
+    [switch] $Solo
 )
 
 $ErrorActionPreference = 'Stop'
 
 # ---------------------------------------------------------------------------
 # EDIT ME. These must be real teams in your org, or reviewer gates are skipped.
+# Ignored entirely in -Solo mode.
 # ---------------------------------------------------------------------------
 $Teams = @{
     Platform        = 'platform-engineering'
@@ -141,18 +159,51 @@ $Owner = $Repo.Split('/')[0]
 Write-Ok "Repository: $Repo"
 if ($DryRun) { Write-Warn 'DRY RUN -- no changes will be made.' }
 
-# Resolve teams to IDs up front. A team that does not exist becomes a warning,
-# not a crash -- but its environment gate will be left open, so it matters.
-Write-Step 'Resolving teams'
+# Is the owner a personal account? Personal accounts cannot have teams at all,
+# so team-based reviewer gates are impossible there. Catch it early and say so,
+# rather than emitting six confusing "team not found" warnings.
+$ownerType = gh api "users/$Owner" --jq '.type' 2>$null
+if ($LASTEXITCODE -ne 0) { $ownerType = 'Unknown' }
+Write-Ok "Owner: $Owner ($ownerType)"
+
+if ($ownerType -eq 'User' -and -not $Solo) {
+    Write-Warn ''
+    Write-Warn "'$Owner' is a personal account, which cannot have teams -- so every"
+    Write-Warn 'team-based reviewer gate below will be skipped, and the enterprise'
+    Write-Warn 'ruleset requires 2 approvals + code-owner review, which you cannot'
+    Write-Warn 'satisfy on your own (GitHub forbids approving your own PR).'
+    Write-Warn ''
+    Write-Warn 'You almost certainly want:   ./scripts/bootstrap-github.ps1 -Solo'
+    Write-Warn ''
+}
+
+# --- Reviewers --------------------------------------------------------------
+
+$SoloReviewer = $null
 $TeamIds = @{}
-foreach ($slug in ($Teams.Values | Sort-Object -Unique)) {
-    $id = gh api "orgs/$Owner/teams/$slug" --jq '.id' 2>$null
-    if ($LASTEXITCODE -eq 0 -and $id) {
-        $TeamIds[$slug] = [int]$id
-        Write-Ok "$slug -> $id"
-    }
-    else {
-        Write-Warn "Team '$slug' not found in org '$Owner'. Environments gated on it will have NO required reviewer."
+
+if ($Solo) {
+    Write-Step 'Resolving reviewer (solo mode)'
+    $me = gh api user --jq '.id' 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $me) { throw 'Could not resolve the authenticated user.' }
+    $login = gh api user --jq '.login'
+    $SoloReviewer = [int]$me
+    Write-Ok "You ($login, id $SoloReviewer) are the required reviewer on every gated environment."
+    Write-Warn 'prevent_self_review is OFF in solo mode -- you can approve your own deploys.'
+}
+else {
+    # Resolve teams to IDs up front. A team that does not exist becomes a warning,
+    # not a crash -- but its environment gate will be left open, so it matters.
+    Write-Step 'Resolving teams'
+    foreach ($slug in ($Teams.Values | Sort-Object -Unique)) {
+        $id = gh api "orgs/$Owner/teams/$slug" --jq '.id' 2>$null
+        if ($LASTEXITCODE -eq 0 -and $id) {
+            $TeamIds[$slug] = [int]$id
+            Write-Ok "$slug -> $id"
+        }
+        else {
+            Write-Warn "Team '$slug' not found in org '$Owner'. Environments gated on it will have NO required reviewer."
+        }
     }
 }
 
@@ -223,7 +274,16 @@ Invoke-GhApi -Method PUT -Path "repos/$Repo/actions/permissions/fork-pr-workflow
 
 Write-Step '3. Branch ruleset on main'
 
-$rulesetPath = Join-Path $PSScriptRoot '..' '.github' 'rulesets' 'main.json'
+$rulesetFile = if ($Solo) { 'main-solo.json' } else { 'main.json' }
+$rulesetPath = Join-Path $PSScriptRoot '..' '.github' 'rulesets' $rulesetFile
+Write-Ok "Using $rulesetFile"
+
+if ($Solo) {
+    Write-Warn 'Solo ruleset: 0 required approvals, no code-owner review, no signed-commit'
+    Write-Warn 'requirement. Still enforced: PR required, ci-passed must pass, code-scanning'
+    Write-Warn 'threshold, linear history, no force-push, no deletion.'
+}
+
 if (-not (Test-Path $rulesetPath)) {
     Write-Warn "Ruleset file not found at $rulesetPath -- skipping."
 }
@@ -247,18 +307,35 @@ Write-Step '4. Deployment environments'
 
 foreach ($e in $Environments) {
     $reviewers = @()
-    foreach ($slug in $e.Reviewers) {
-        if ($TeamIds.ContainsKey($slug)) {
-            $reviewers += @{ type = 'Team'; id = $TeamIds[$slug] }
+
+    if ($Solo) {
+        # dev stays ungated even in solo mode -- it is fed automatically by CI, and
+        # gating it would mean approving a deployment on every single merge.
+        if ($e.Name -ne 'dev') {
+            $reviewers += @{ type = 'User'; id = $SoloReviewer }
+        }
+    }
+    else {
+        foreach ($slug in $e.Reviewers) {
+            if ($TeamIds.ContainsKey($slug)) {
+                $reviewers += @{ type = 'Team'; id = $TeamIds[$slug] }
+            }
         }
     }
 
     $body = @{
-        wait_timer          = $e.Wait
-        # Stops the person who requested the promotion from also approving it.
-        # Separation of duties, enforced by the platform rather than by policy.
-        prevent_self_review = ($reviewers.Count -gt 0)
-        reviewers           = $reviewers
+        wait_timer = $e.Wait
+
+        # Stops whoever requested the promotion from also approving it. Separation
+        # of duties, enforced by the platform rather than by a policy document.
+        #
+        # It must be OFF in solo mode: you are both the requester and the only
+        # possible approver, so leaving it on would make every deployment
+        # permanently un-approvable.
+        prevent_self_review = (-not $Solo) -and ($reviewers.Count -gt 0)
+
+        reviewers = $reviewers
+
         deployment_branch_policy = @{
             # Only main can deploy anywhere. A feature branch cannot reach an
             # environment even if someone hand-crafts a workflow_dispatch.
@@ -267,14 +344,15 @@ foreach ($e in $Environments) {
         }
     }
 
-    $gate = if ($reviewers.Count -gt 0) { "$($reviewers.Count) reviewer team(s)" } else { 'NO REVIEWER GATE' }
+    $who  = if ($Solo) { 'you' } else { 'reviewer team(s)' }
+    $gate = if ($reviewers.Count -gt 0) { "$($reviewers.Count) $who" } else { 'no reviewer gate' }
     $wait = if ($e.Wait -gt 0) { ", $($e.Wait)m wait" } else { '' }
 
     Invoke-GhApi -Method PUT -Path "repos/$Repo/environments/$($e.Name)" `
         -What "Environment '$($e.Name)' -- $gate$wait" -Body $body | Out-Null
 
     if ($reviewers.Count -eq 0 -and $e.Name -ne 'dev') {
-        Write-Warn "  '$($e.Name)' has no required reviewers. Anyone who can merge can deploy to it."
+        Write-Warn "  '$($e.Name)' has NO required reviewers. Anyone who can merge can deploy to it."
     }
 }
 
@@ -329,5 +407,29 @@ Write-Step 'Remaining manual steps'
   Note: the ruleset already requires the 'ci-passed' check. Until CI has run once,
   PRs will sit blocked waiting for it. That is the gate working, not a bug.
 "@ | Write-Host -ForegroundColor White
+
+if ($Solo) {
+    Write-Step 'You are in SOLO mode'
+    @"
+  What is REDUCED (because one person cannot approve their own PR):
+    - required approving reviews   2  ->  0
+    - code-owner review            required  ->  not required
+    - prevent_self_review          on  ->  off   (you approve your own deploys)
+    - signed commits               required  ->  not required
+
+  What is STILL FULLY ENFORCED:
+    - pull request required to reach main; no direct pushes, no force-push
+    - 'ci-passed' must be green: build, tests, CodeQL, dependency review
+    - code-scanning alert threshold blocks merges
+    - linear history, squash-only merges
+    - every environment past dev needs YOUR explicit approval before it deploys
+    - prod still has its 10-minute wait timer
+    - artifact digest + SLSA provenance verified at promote AND deploy
+    - read-only default token, actions allow-list, deploy only from main
+
+  To go enterprise later: move the repo to an org, create the six teams, swap the
+  block at the bottom of .github/CODEOWNERS, then re-run this script with NO -Solo.
+"@ | Write-Host -ForegroundColor White
+}
 
 Write-Host "`nDone.`n" -ForegroundColor Green
