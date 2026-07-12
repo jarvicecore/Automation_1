@@ -19,6 +19,63 @@ Full design notes: [docs/PIPELINE.md](docs/PIPELINE.md).
 
 ---
 
+## See it work, in two minutes
+
+The repo ships a **six-environment rig** in Docker. Each container is a *deployment
+target*, not an application — they come up **empty** and idle until an artifact is
+installed into them, exactly like a freshly provisioned host. That's what makes this
+a fair test rather than a demo that flatters itself.
+
+```bash
+docker compose up -d --build   # six empty environments: dev qa stage uat prod train
+./scripts/demo.sh              # build ONE artifact, promote it through all six
+```
+
+```text
+SIX ENVIRONMENTS, ONE DIGEST
+ENV     PORT    VERIFIED  DIGEST RUNNING
+dev     8081    yes       0c0e8fbe4428fd223c0af5df0f914abf...
+qa      8082    yes       0c0e8fbe4428fd223c0af5df0f914abf...
+stage   8083    yes       0c0e8fbe4428fd223c0af5df0f914abf...
+uat     8084    yes       0c0e8fbe4428fd223c0af5df0f914abf...
+prod    8085    yes       0c0e8fbe4428fd223c0af5df0f914abf...
+train   8086    yes       0c0e8fbe4428fd223c0af5df0f914abf...
+
+All six environments are running the identical artifact.
+```
+
+Open <http://localhost:8085>. It says **Hello, World** — and then proves which build
+of itself is saying it. The service re-hashes the tarball it was unpacked from and
+compares that against the digest the promotion recorded. `/version` returns **409**
+if they disagree, so a service that cannot prove its own identity **fails its own
+deployment** rather than quietly serving traffic.
+
+### Try to break it
+
+A check that can't fail is decoration. Prove this one can:
+
+```bash
+docker exec -u root automation1-prod sh -c 'echo tampered >> /opt/app/artifact.tar.gz'
+docker restart automation1-prod && sleep 5
+
+ARTIFACT_SHA256=<the digest demo.sh printed> \
+EXTRACT_TARGET=docker://automation1-prod \
+  ./scripts/smoke-test.sh prod        # exits 1 — deployment blocked
+```
+
+`/version` flips to `409 self_verified:false`, and the smoke test fails the deploy.
+Re-run `./scripts/demo.sh` to restore it.
+
+Tear down with `docker compose down -v`.
+
+**What this does and doesn't prove.** The local rig proves the *data path*: build
+once, install the same bytes six times, detect tampering. The *control plane* —
+approval gates, CODEOWNERS, SLSA attestation, promotion PRs — runs on GitHub and is
+exercised by the real workflows. The two halves meet in `deploy.sh`, which is the
+same script in both.
+
+---
+
 ## Where things stand right now
 
 Read this before you start — some of it is already done.
@@ -33,7 +90,9 @@ Read this before you start — some of it is already done.
 | `bootstrap-github.ps1` | ❌ not run yet |
 | Promotion GitHub App | ❌ not created |
 | Snyk / SonarQube | ❌ off (flag-gated, pipeline is green without them) |
-| `build.sh` / `test.sh` / `deploy.sh` / `smoke-test.sh` | ⚠️ working stubs — they run, but don't do anything real |
+| Reference app + six-environment Docker rig | ✅ real and working — `./scripts/demo.sh` |
+| `build.sh` / `test.sh` / `smoke-test.sh` | ✅ real (packaging, 11 pytest tests, provenance + contract checks) |
+| `deploy.sh` | ⚠️ real against the Docker rig; **still a stub for your actual target** — step 7 |
 
 ---
 
@@ -49,7 +108,7 @@ PRs — becomes unmergeable, because GitHub cannot resolve the required reviewer
 
 Either create them in your org:
 
-```
+```text
 platform-engineering
 security
 qa
@@ -63,7 +122,7 @@ training
 [scripts/bootstrap-github.ps1](scripts/bootstrap-github.ps1) to point at your own
 username instead:
 
-```
+```text
 *   @bryan-yourhandle
 ```
 
@@ -150,17 +209,25 @@ The deploy job already has `id-token: write`. **Prefer OIDC federation and delet
 `EXTRACT_CREDENTIALS` entirely** — a long-lived secret in six environments is six
 places to leak it from.
 
-### 7. Replace the stubs
+### 7. Point `deploy.sh` at your real target
 
-Four scripts. They run end-to-end today so you can test the *pipeline* before you
-have an *application*, but they don't do anything real.
+The reference app in [src/app/](src/app/) is a real, working service — it exists so
+the pipeline has something honest to carry. Keep it until your own extracts are
+ready; it costs nothing and it keeps the gates exercised.
 
-| File | Runs | Replace with |
+The scripts are all real, with **one** seam left open:
+
+| File | Runs | State |
 | --- | --- | --- |
-| [scripts/build.sh](scripts/build.sh) | CI + release | Your build. **Must stay deterministic** — see below. |
-| [scripts/test.sh](scripts/test.sh) | CI + release | Your tests. Non-zero exit blocks the merge. |
-| [scripts/deploy.sh](scripts/deploy.sh) | Every environment | Push extracts to `$EXTRACT_TARGET`. |
-| [scripts/smoke-test.sh](scripts/smoke-test.sh) | After every deploy | Prove the deploy came up. |
+| [scripts/build.sh](scripts/build.sh) | CI + release | ✅ Packages `src/` into a deterministic tarball. |
+| [scripts/test.sh](scripts/test.sh) | CI + release | ✅ Runs pytest + pipeline self-checks. |
+| [scripts/smoke-test.sh](scripts/smoke-test.sh) | After every deploy | ✅ Liveness, provenance self-check, digest match, schema contract. |
+| [scripts/deploy.sh](scripts/deploy.sh) | Every environment | ⚠️ **Real for `docker://` targets. Everything else is a stub — this is the one you own.** |
+
+`deploy.sh` dispatches on `EXTRACT_TARGET`. A `docker://…` value drives the local
+rig; anything else falls through to a clearly marked `TODO` where your Airflow /
+ADF / Databricks / scheduler call belongs. The verification either side of it —
+digest check, SLSA attestation, smoke test — already works and doesn't change.
 
 Two rules that are load-bearing, not stylistic:
 

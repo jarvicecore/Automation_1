@@ -19,17 +19,29 @@ updates:
       actions-minor-patch:
         update-types: [minor, patch]
 
-  # Uncomment the ecosystem(s) your extracts actually use.
-  #
-  # - package-ecosystem: pip
-  #   directory: /
-  #   schedule:
-  #     interval: weekly
-  #   open-pull-requests-limit: 10
-  #   labels: [dependencies, security]
-  #   groups:
-  #     prod-minor-patch:
-  #       dependency-type: production
-  #       update-types: [minor, patch]
-  #     dev-all:
-  #       dependency-type: development
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    open-pull-requests-limit: 10
+    labels: [dependencies, security]
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      prod-minor-patch:
+        dependency-type: production
+        update-types: [minor, patch]
+      dev-all:
+        dependency-type: development
+
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    labels: [dependencies, security]
+    commit-message:
+      prefix: 'chore(docker)'
