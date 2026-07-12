@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Step One
-        run: echo "Job 1 - Step One"
+        uses: actions/checkout@v4
       - name: Step Two
         run: echo "Job 1 - Step Two"
   job2:
@@ -14,6 +14,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Step One
-        run: echo "Job 2 - Step One"
+        run: env | sort
       - name: Step Two
         run: echo "Job 2 - Step Two"
