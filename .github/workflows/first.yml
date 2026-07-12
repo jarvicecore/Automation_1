@@ -14,6 +14,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Step One
-        run: env | sort
+        run: echo "Job 2 - Step One"
       - name: Step Two
-        run: echo "Job 2 - Step Two"
+        run: "Get-ChildItem Env: | Sort-Object Name"
