@@ -1,0 +1,35 @@
+version: 2
+
+updates:
+  # The one most repos forget. Your workflows are pinned to commit SHAs, which is
+  # correct for security but means nothing ever updates them -- including security
+  # patches to the actions themselves. Dependabot resolves the SHA behind each tag
+  # and raises a PR when it moves, so pinning costs you nothing in maintenance.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    open-pull-requests-limit: 10
+    labels: [dependencies, github-actions, security]
+    commit-message:
+      prefix: 'chore(actions)'
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+
+  # Uncomment the ecosystem(s) your extracts actually use.
+  #
+  # - package-ecosystem: pip
+  #   directory: /
+  #   schedule:
+  #     interval: weekly
+  #   open-pull-requests-limit: 10
+  #   labels: [dependencies, security]
+  #   groups:
+  #     prod-minor-patch:
+  #       dependency-type: production
+  #       update-types: [minor, patch]
+  #     dev-all:
+  #       dependency-type: development

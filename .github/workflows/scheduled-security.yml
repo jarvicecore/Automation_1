@@ -1,0 +1,105 @@
+
+# Scheduled deep security scan.
+#
+# PR-time scanning only tells you about code that changed. This tells you about
+# code that did not change but whose world did -- a new CVE published against a
+# dependency you shipped to Prod six months ago.
+#
+# Also publishes an OpenSSF Scorecard, which grades this repository's own supply
+# chain posture (action pinning, branch protection, token permissions, ...).
+
+name: Scheduled Security
+
+on:
+  schedule:
+    - cron: '17 3 * * *'      # nightly, off-peak, off the hour to dodge scheduler pileups
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: scheduled-security
+  cancel-in-progress: true
+
+jobs:
+  full-scan:
+    name: Full scan
+    uses: ./.github/workflows/_security.yml
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    secrets: inherit
+    with:
+      dependency-review: false
+      fail-on-severity: medium   # stricter than PR gate; findings here are alerts, not blockers
+
+  scorecard:
+    name: OpenSSF Scorecard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: false
+
+      - name: Upload results
+        uses: github/codeql-action/upload-sarif@3599b3baa15b485a2e49ef411a7a4bb2452e7f93 # v3.30.5
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard
+
+  drift:
+    name: Environment drift report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      # Surfaces how far Prod has fallen behind Dev. A pipeline nobody promotes
+      # through is a pipeline that will get bypassed under pressure, so the drift
+      # number is an early warning about the process, not just the code.
+      - name: Report promotion drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          dev_tag="$(gh release list --limit 1 --json tagName --jq '.[0].tagName // "-"')"
+
+          {
+            echo "## Environment drift"
+            echo ""
+            echo "| Environment | Release | Promoted at |"
+            echo "| --- | --- | --- |"
+            echo "| dev | \`${dev_tag}\` | (latest release, always) |"
+            for e in qa stage uat prod train; do
+              f="environments/${e}.yaml"
+              tag="$(yq -r '.release_tag' "$f")"
+              at="$(yq -r '.promoted_at' "$f")"
+              echo "| ${e} | \`${tag:--}\` | ${at:--} |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

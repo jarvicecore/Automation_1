@@ -1,0 +1,34 @@
+# CODEOWNERS -- who must approve what.
+#
+# Combined with "Require review from Code Owners" in the main ruleset, this is
+# the mechanism that gives each environment its own approval authority. A
+# promotion PR into prod touches environments/prod.yaml, which means the
+# release-managers team is REQUIRED to approve it -- a developer cannot
+# self-merge their way into production.
+#
+# Replace @jarvicecore/* with your real GitHub teams before enabling the ruleset,
+# otherwise nobody can approve anything and every PR deadlocks.
+
+# Default owner for everything not matched below.
+*                               @jarvicecore/platform-engineering
+
+# --- Pipeline itself -------------------------------------------------------
+# Changes to CI/CD are changes to the control plane. Treat them as such: whoever
+# can edit a workflow can exfiltrate every secret the workflow can reach.
+/.github/workflows/             @jarvicecore/platform-engineering @jarvicecore/security
+/.github/CODEOWNERS             @jarvicecore/platform-engineering @jarvicecore/security
+/.github/dependabot.yml         @jarvicecore/platform-engineering
+/scripts/                       @jarvicecore/platform-engineering
+
+# --- Promotion gates -------------------------------------------------------
+# Each environment manifest gets progressively stricter ownership. This is the
+# whole point: the file that says "prod runs v0.1.42" can only be changed with
+# release-manager and security sign-off.
+/environments/promotion-path.yaml  @jarvicecore/platform-engineering @jarvicecore/release-managers
+
+# dev has no manifest -- it always runs the latest release. Nothing to own.
+/environments/qa.yaml           @jarvicecore/qa
+/environments/stage.yaml        @jarvicecore/qa @jarvicecore/release-managers
+/environments/uat.yaml          @jarvicecore/release-managers @jarvicecore/business-owners
+/environments/prod.yaml         @jarvicecore/release-managers @jarvicecore/security
+/environments/train.yaml        @jarvicecore/release-managers @jarvicecore/training

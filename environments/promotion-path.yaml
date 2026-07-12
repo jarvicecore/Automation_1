@@ -1,0 +1,28 @@
+# Promotion topology. The Promote workflow reads this to decide where an
+# environment's next release comes from. Editing this file changes the pipeline
+# shape -- it is the single place the environment order is defined.
+#
+#   dev --> qa --> stage --> uat --> prod --> train
+#
+# dev is fed by CI (release.yml) and has no promotion source -- and no manifest
+# file either. dev always runs the latest GitHub Release, by definition, so
+# promoting "from dev" means promoting the latest release.
+#
+# train is fed from prod so that training always mirrors what customers use.
+
+promotions:
+  qa:
+    from: dev
+    description: First promotion gate. Binary promotion begins here -- QA runs the exact artifact built by CI.
+  stage:
+    from: qa
+    description: Pre-production rehearsal on production-like data volumes.
+  uat:
+    from: stage
+    description: Business acceptance sign-off.
+  prod:
+    from: uat
+    description: Production. Requires the strictest approval set.
+  train:
+    from: prod
+    description: Training environment, mirrors production so trainees never see unreleased behaviour.

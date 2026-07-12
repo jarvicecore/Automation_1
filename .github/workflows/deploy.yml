@@ -1,0 +1,93 @@
+
+# Deploy -- reacts to a merged promotion PR.
+#
+# Merging a promotion PR changes exactly one file: environments/<env>.yaml.
+# This workflow notices which manifest moved and deploys that environment to the
+# release tag the manifest now names.
+#
+# dev is intentionally NOT in the trigger paths -- dev is deployed directly by
+# release.yml, and its manifest is written after the fact as a record.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'environments/qa.yaml'
+      - 'environments/stage.yaml'
+      - 'environments/uat.yaml'
+      - 'environments/prod.yaml'
+      - 'environments/train.yaml'
+
+permissions: {}
+
+jobs:
+  detect:
+    name: Detect promoted environments
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      any: ${{ steps.detect.outputs.any }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - id: detect
+        name: Diff environment manifests
+        run: |
+          set -euo pipefail
+
+          changed="$(git diff --name-only HEAD^ HEAD -- environments/ || true)"
+          include='[]'
+
+          for f in $changed; do
+            case "$f" in
+              environments/dev.yaml|environments/promotion-path.yaml) continue ;;
+              environments/*.yaml) ;;
+              *) continue ;;
+            esac
+            [ -f "$f" ] || continue
+
+            env_name="$(yq -r '.environment' "$f")"
+            tag="$(yq -r '.release_tag' "$f")"
+            digest="$(yq -r '.artifact_sha256' "$f")"
+
+            if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+              echo "::warning::${f} has no release_tag; skipping."
+              continue
+            fi
+
+            include="$(echo "$include" | jq -c \
+              --arg e "$env_name" --arg t "$tag" --arg d "$digest" \
+              '. + [{environment:$e, tag:$t, digest:$d}]')"
+          done
+
+          count="$(echo "$include" | jq 'length')"
+          echo "matrix={\"include\":${include}}" >> "$GITHUB_OUTPUT"
+          echo "any=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "Detected ${count} environment(s) to deploy."
+
+  deploy:
+    name: Deploy
+    needs: detect
+    if: needs.detect.outputs.any == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    uses: ./.github/workflows/_deploy.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: read
+      deployments: write
+    secrets: inherit
+    with:
+      environment: ${{ matrix.environment }}
+      release-tag: ${{ matrix.tag }}
+      artifact-sha256: ${{ matrix.digest }}

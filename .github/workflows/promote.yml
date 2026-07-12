@@ -1,0 +1,215 @@
+
+# Promote -- opens a promotion pull request for one environment.
+#
+# This is the "pull request at every environment" control. Promotion never
+# rebuilds and never touches the artifact; it only proposes a one-line change to
+# the target environment's manifest, moving it to the release tag that is already
+# running in the upstream environment.
+#
+# The PR is the approval artifact: it is reviewable, blameable, revertable, and
+# CODEOWNERS decides who can approve it per environment. Merging it triggers
+# deploy.yml, which is the only thing that can actually move bits.
+#
+# Promotion path (see environments/promotion-path.yaml):
+#   dev -> qa -> stage -> uat -> prod -> train
+
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to promote INTO.
+        required: true
+        type: choice
+        options: [qa, stage, uat, prod, train]
+      reason:
+        description: Change/ticket reference for the audit trail.
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: promote-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Open promotion PR -> ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: main
+
+      # A PR opened with the default GITHUB_TOKEN does NOT trigger workflows --
+      # GitHub suppresses that to prevent recursion. Without a GitHub App token
+      # the promotion PR would sit there with zero checks and merge unverified.
+      # Configure vars.PROMOTION_APP_ID + secrets.PROMOTION_APP_PRIVATE_KEY.
+      - name: Mint GitHub App token
+        id: app-token
+        if: vars.PROMOTION_APP_ID != ''
+        uses: actions/create-github-app-token@67018539274d69449ef7c02e8e71183d1719ab42 # v2.1.4
+        with:
+          app-id: ${{ vars.PROMOTION_APP_ID }}
+          private-key: ${{ secrets.PROMOTION_APP_PRIVATE_KEY }}
+
+      - name: Resolve source environment
+        id: src
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+
+          source_env="$(yq -r ".promotions.${TARGET}.from" environments/promotion-path.yaml)"
+          if [ -z "$source_env" ] || [ "$source_env" = "null" ]; then
+            echo "::error::No promotion source defined for '${TARGET}' in environments/promotion-path.yaml."
+            exit 1
+          fi
+
+          if [ "$source_env" = "dev" ]; then
+            # dev has no manifest -- it always runs the latest release, because
+            # release.yml deploys every build there. Read that directly.
+            tag="$(gh release list --limit 1 --json tagName --jq '.[0].tagName')"
+            expected=''   # nothing upstream to cross-check against; the attestation is the proof
+          else
+            manifest="environments/${source_env}.yaml"
+            tag="$(yq -r '.release_tag' "$manifest")"
+            expected="$(yq -r '.artifact_sha256' "$manifest")"
+          fi
+
+          if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+            echo "::error::Source environment '${source_env}' has nothing deployed. Nothing to promote."
+            exit 1
+          fi
+
+          # Refuse a no-op promotion: it would open an empty PR and burn a review.
+          current="$(yq -r '.release_tag' "environments/${TARGET}.yaml")"
+          if [ "$current" = "$tag" ]; then
+            echo "::error::${TARGET} is already running ${tag}. Nothing to promote."
+            exit 1
+          fi
+
+          {
+            echo "source=${source_env}"
+            echo "tag=${tag}"
+            echo "expected=${expected}"
+            echo "current=${current}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Independent confirmation that the bits being promoted are the bits this
+      # repo built. Catches a tampered release asset BEFORE a human is asked to
+      # approve it, rather than at deploy time. The digest this step computes is
+      # the one written into the manifest, so what the approver sees in the PR is
+      # what the deploy job will later re-verify.
+      - name: Verify artifact provenance before proposing
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.src.outputs.tag }}
+          EXPECTED: ${{ steps.src.outputs.expected }}
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          gh release download "$TAG" --dir "$tmp" --pattern '*.tar.gz'
+          file="$(ls "$tmp"/*.tar.gz | head -n1)"
+
+          digest="$(sha256sum "$file" | cut -d' ' -f1)"
+
+          if [ -n "$EXPECTED" ] && [ "$EXPECTED" != "null" ] && [ "$digest" != "$EXPECTED" ]; then
+            echo "::error::Release asset for ${TAG} is ${digest} but the upstream environment approved ${EXPECTED}."
+            echo "::error::The release asset changed after it was approved upstream. Refusing to propose."
+            exit 1
+          fi
+
+          gh attestation verify "$file" \
+            --repo "${{ github.repository }}" \
+            --signer-workflow "${{ github.repository }}/.github/workflows/_build.yml"
+
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Write target manifest
+        env:
+          TARGET: ${{ inputs.environment }}
+          SOURCE: ${{ steps.src.outputs.source }}
+          TAG: ${{ steps.src.outputs.tag }}
+          DIGEST: ${{ steps.verify.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cat > "environments/${TARGET}.yaml" <<EOF
+          # Managed by promotion PRs. The release_tag below is what ${TARGET} runs.
+          environment: ${TARGET}
+          release_tag: "${TAG}"
+          artifact_sha256: "${DIGEST}"
+          promoted_from: ${SOURCE}
+          promoted_by: "${{ github.actor }}"
+          promoted_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          EOF
+
+      - name: Open promotion PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          TARGET: ${{ inputs.environment }}
+          SOURCE: ${{ steps.src.outputs.source }}
+          TAG: ${{ steps.src.outputs.tag }}
+          DIGEST: ${{ steps.verify.outputs.digest }}
+          CURRENT: ${{ steps.src.outputs.current }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          branch="promote/${TARGET}-${TAG}"
+
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -b "$branch"
+          git add "environments/${TARGET}.yaml"
+          git commit -m "promote(${TARGET}): ${CURRENT:-none} -> ${TAG}"
+          git push --force-with-lease origin "$branch"
+
+          body="$(cat <<EOF
+          ## Promotion: \`${SOURCE}\` -> \`${TARGET}\`
+
+          | Field | Value |
+          | --- | --- |
+          | Release | \`${TAG}\` |
+          | Digest | \`${DIGEST}\` |
+          | Currently deployed | \`${CURRENT:-none}\` |
+          | Reason | ${REASON} |
+          | Requested by | @${{ github.actor }} |
+
+          ### What merging this does
+          Deploys the **existing, already-built** artifact \`${TAG}\` to \`${TARGET}\`.
+          No code is rebuilt. The identical bits running in \`${SOURCE}\` move to \`${TARGET}\`.
+
+          ### Pre-merge verification (already performed)
+          - Release asset digest matches the digest approved in \`${SOURCE}\`
+          - SLSA build provenance verified against \`_build.yml\` in this repository
+
+          ### Approver checklist
+          - [ ] \`${SOURCE}\` has been validated and is healthy
+          - [ ] Change reference \`${REASON}\` is approved
+          - [ ] Deployment window for \`${TARGET}\` is open
+          EOF
+          )"
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "promote(${TARGET}): ${TAG}" \
+            --body "$body" \
+            --label "promotion" \
+            --label "env:${TARGET}"

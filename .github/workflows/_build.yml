@@ -1,0 +1,136 @@
+
+# Reusable build workflow.
+#
+# Builds the deployable artifact EXACTLY ONCE. Every downstream environment
+# consumes the output of this workflow -- nothing is ever rebuilt per-environment.
+# That is what makes "binary promotion" real rather than aspirational.
+#
+# Outputs a tarball + SHA256 digest + SBOM + SLSA build provenance attestation.
+
+name: _build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Semantic version to stamp into the artifact.
+        required: true
+        type: string
+      runner:
+        description: Runner label. Override to point at self-hosted/ARC pools.
+        required: false
+        type: string
+        default: ubuntu-latest
+      publish:
+        description: >-
+          When true, produce a signed, attested artifact intended for release.
+          When false (PR builds), build and test only -- no attestation, no release.
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      artifact-name:
+        description: Name of the uploaded workflow artifact.
+        value: ${{ jobs.build.outputs.artifact-name }}
+      artifact-file:
+        description: Filename of the built tarball.
+        value: ${{ jobs.build.outputs.artifact-file }}
+      artifact-sha256:
+        description: SHA256 digest of the built tarball. This is the identity that gets promoted.
+        value: ${{ jobs.build.outputs.artifact-sha256 }}
+
+jobs:
+  build:
+    name: Build & test
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      # id-token + attestations are only needed for release builds, but permissions
+      # cannot be conditional. They are inert unless the attest step runs.
+      id-token: write
+      attestations: write
+
+    outputs:
+      artifact-name: ${{ steps.package.outputs.artifact-name }}
+      artifact-file: ${{ steps.package.outputs.artifact-file }}
+      artifact-sha256: ${{ steps.package.outputs.artifact-sha256 }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          # Start in audit mode. Once you have reviewed the observed egress in the
+          # run summary, switch to `block` and enumerate allowed-endpoints.
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Build
+        env:
+          BUILD_VERSION: ${{ inputs.version }}
+          BUILD_SHA: ${{ github.sha }}
+        run: ./scripts/build.sh
+
+      - name: Test
+        env:
+          BUILD_VERSION: ${{ inputs.version }}
+        run: ./scripts/test.sh
+
+      - name: Package
+        id: package
+        env:
+          BUILD_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          file="$(ls dist/*.tar.gz | head -n1)"
+          name="$(basename "$file")"
+          digest="$(sha256sum "$file" | cut -d' ' -f1)"
+
+          echo "${digest}  ${name}" > "dist/${name}.sha256"
+
+          {
+            echo "artifact-name=build-${BUILD_VERSION}"
+            echo "artifact-file=${name}"
+            echo "artifact-sha256=${digest}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Build artifact"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Version | \`${BUILD_VERSION}\` |"
+            echo "| File | \`${name}\` |"
+            echo "| SHA256 | \`${digest}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@8e94d75ddd33f69f691467e42275782e4bfefe84 # v0.20.9
+        with:
+          path: .
+          format: cyclonedx-json
+          artifact-name: sbom-${{ inputs.version }}.cyclonedx.json
+          output-file: dist/sbom.cyclonedx.json
+
+      # SLSA build provenance. The deploy workflow REFUSES to deploy any artifact
+      # whose provenance does not verify back to this repository and workflow,
+      # which is what stops a hand-crafted tarball from being promoted to prod.
+      - name: Attest build provenance
+        if: inputs.publish
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: dist/${{ steps.package.outputs.artifact-file }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: ${{ steps.package.outputs.artifact-name }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90

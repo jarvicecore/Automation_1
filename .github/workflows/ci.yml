@@ -1,0 +1,88 @@
+
+# CI -- the Dev quality gate.
+#
+# Runs on every pull request into main. Builds, tests and scans, but publishes
+# nothing. A green run here is the precondition for merging; the merge itself is
+# what produces a release candidate (see release.yml).
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+# Deny-by-default. Every job below opts in to the minimum it needs.
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - id: v
+        name: Compute version
+        run: |
+          set -euo pipefail
+          base="$(tr -d '[:space:]' < VERSION)"
+          echo "version=${base}.${{ github.run_number }}-pr${{ github.event.pull_request.number || 0 }}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build
+    needs: version
+    uses: ./.github/workflows/_build.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+      publish: false
+
+  security:
+    name: Security
+    uses: ./.github/workflows/_security.yml
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+      packages: read
+    secrets: inherit
+    with:
+      dependency-review: true
+
+  # The single required status check. Point branch protection at "CI / ci-passed"
+  # and it stays correct no matter how many jobs you add above.
+  ci-passed:
+    name: ci-passed
+    if: always()
+    needs: [build, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Check upstream results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          for r in ${RESULTS}; do
+            if [ "$r" != "success" ]; then
+              echo "::error::CI failed (upstream job reported '${r}')."
+              exit 1
+            fi
+          done
+          echo "CI passed."
