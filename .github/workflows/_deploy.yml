@@ -122,10 +122,17 @@ jobs:
           EXTRACT_CREDENTIALS: ${{ secrets.EXTRACT_CREDENTIALS }}
         run: ./scripts/deploy.sh "$TARGET_ENV"
 
+      # ARTIFACT_SHA256 and SMOKE_URL must both be passed here, not just to the
+      # deploy step. Without ARTIFACT_SHA256 the smoke test can only check that the
+      # service is internally self-consistent -- it could be perfectly consistent
+      # about the WRONG release. Without SMOKE_URL it has nothing to probe and
+      # degrades to a no-op. Either omission makes the check quietly inert.
       - name: Smoke test
         env:
           TARGET_ENV: ${{ inputs.environment }}
+          ARTIFACT_SHA256: ${{ inputs.artifact-sha256 }}
           EXTRACT_TARGET: ${{ vars.EXTRACT_TARGET }}
+          SMOKE_URL: ${{ vars.SMOKE_URL || vars.ENVIRONMENT_URL }}
         run: ./scripts/smoke-test.sh "$TARGET_ENV"
 
       - name: Record deployment
