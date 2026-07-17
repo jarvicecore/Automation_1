@@ -1,0 +1,7 @@
+# Runtime dependencies. Pinned exactly -- a floating range means two builds of
+# the same commit can install different code, which would make the artifact
+# digest unreproducible and the promotion manifests unverifiable.
+#
+# Dependabot raises PRs when these move; Snyk and dependency-review scan them.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0

@@ -1,0 +1,151 @@
+
+# Release -- produces the immutable binary, then auto-deploys it to Dev.
+#
+# This is the ONLY workflow permitted to build a deployable artifact. It runs on
+# merge to main. The artifact it publishes is the one that will eventually reach
+# Prod; everything downstream is promotion, never rebuild.
+#
+# Note: this does not fire on changes to environments/**, because those commits
+# are promotion PRs, which must NOT mint a new build. See deploy.yml.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'environments/**'
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - id: v
+        name: Compute version
+        run: |
+          set -euo pipefail
+          base="$(tr -d '[:space:]' < VERSION)"
+          version="${base}.${{ github.run_number }}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build
+    needs: version
+    uses: ./.github/workflows/_build.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+      publish: true
+
+  security:
+    name: Security
+    uses: ./.github/workflows/_security.yml
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    secrets: inherit
+
+  release:
+    name: Publish release
+    needs: [version, build, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: write   # required to create the release + tag
+
+    outputs:
+      tag: ${{ needs.version.outputs.tag }}
+      sha256: ${{ needs.build.outputs.artifact-sha256 }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download built artifact
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          DIGEST: ${{ needs.build.outputs.artifact-sha256 }}
+          FILE: ${{ needs.build.outputs.artifact-file }}
+        run: |
+          set -euo pipefail
+          notes="$(cat <<EOF
+          Automated release candidate.
+
+          | Field | Value |
+          | --- | --- |
+          | Commit | \`${{ github.sha }}\` |
+          | Artifact | \`${FILE}\` |
+          | SHA256 | \`${DIGEST}\` |
+
+          This artifact carries SLSA build provenance. Verify it with:
+
+          \`\`\`
+          gh attestation verify ${FILE} --repo ${{ github.repository }}
+          \`\`\`
+
+          Promote it with the **Promote** workflow. Do not rebuild.
+          EOF
+          )"
+          gh release create "$TAG" dist/* \
+            --title "$TAG" \
+            --notes "$notes" \
+            --target "${{ github.sha }}"
+
+  # Dev is the only environment that deploys automatically, and it has no manifest
+  # file: dev is BY DEFINITION whatever the latest release is, because every
+  # release lands here. Recording that in git would mean pushing to main from CI,
+  # which would require a bypass hole in the branch ruleset -- not worth it for a
+  # fact we can already derive. Promotion to QA reads the latest release directly.
+  deploy-dev:
+    name: Deploy to dev
+    needs: [release]
+    uses: ./.github/workflows/_deploy.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: read
+      deployments: write
+    secrets: inherit
+    with:
+      environment: dev
+      release-tag: ${{ needs.release.outputs.tag }}
+      artifact-sha256: ${{ needs.release.outputs.sha256 }}

@@ -1,0 +1,71 @@
+# CODEOWNERS -- who must approve what.
+#
+# ---------------------------------------------------------------------------
+# CURRENTLY IN *SOLO MODE* -- everything is owned by @jarvicecore.
+#
+# `jarvicecore` is a personal account, and personal accounts cannot have teams.
+# The enterprise mapping is preserved verbatim at the bottom of this file: move
+# this repo into an org, create those six teams, swap the blocks over, and
+# re-run `./scripts/bootstrap-github.ps1` (without -Solo).
+#
+# One thing solo mode CANNOT do: GitHub will not let you approve your own pull
+# request. So while you are the only owner, the ruleset must not require
+# code-owner review, or every PR deadlocks. That is why
+# `./scripts/bootstrap-github.ps1 -Solo` applies rulesets/main-solo.json
+# instead of rulesets/main.json.
+#
+# In solo mode this file is therefore documentation + auto-assigned reviewers,
+# not an enforced gate. The moment you have a second human, switch back.
+# ---------------------------------------------------------------------------
+
+* @jarvicecore
+
+# --- Pipeline itself -------------------------------------------------------
+# Changes to CI/CD are changes to the control plane. Whoever can edit a workflow
+# can exfiltrate every secret that workflow can reach.
+/.github/workflows/                @jarvicecore
+/.github/CODEOWNERS                @jarvicecore
+/.github/rulesets/                 @jarvicecore
+/.github/dependabot.yml            @jarvicecore
+/scripts/                          @jarvicecore
+
+# --- Promotion gates -------------------------------------------------------
+# The file that says "prod runs v0.1.42" is the most security-relevant line in
+# the repository. Ownership of it is the whole control.
+/environments/promotion-path.yaml  @jarvicecore
+
+# dev has no manifest -- it always runs the latest release. Nothing to own.
+/environments/qa.yaml              @jarvicecore
+/environments/stage.yaml           @jarvicecore
+/environments/uat.yaml             @jarvicecore
+/environments/prod.yaml            @jarvicecore
+/environments/train.yaml           @jarvicecore
+
+
+# ===========================================================================
+# ENTERPRISE MAPPING -- restore this when you move to an org.
+#
+# Delete everything above, uncomment everything below, create the six teams,
+# then run `./scripts/bootstrap-github.ps1` with NO -Solo flag.
+#
+# The point of this layout is that each environment gets progressively stricter
+# ownership. A developer cannot self-merge their way into production, because
+# promoting to prod means editing environments/prod.yaml, which requires
+# release-managers AND security to sign off.
+# ===========================================================================
+#
+# *                                  @ORG/platform-engineering
+#
+# /.github/workflows/                @ORG/platform-engineering @ORG/security
+# /.github/CODEOWNERS                @ORG/platform-engineering @ORG/security
+# /.github/rulesets/                 @ORG/platform-engineering @ORG/security
+# /.github/dependabot.yml            @ORG/platform-engineering
+# /scripts/                          @ORG/platform-engineering
+#
+# /environments/promotion-path.yaml  @ORG/platform-engineering @ORG/release-managers
+#
+# /environments/qa.yaml              @ORG/qa
+# /environments/stage.yaml           @ORG/qa @ORG/release-managers
+# /environments/uat.yaml             @ORG/release-managers @ORG/business-owners
+# /environments/prod.yaml            @ORG/release-managers @ORG/security
+# /environments/train.yaml           @ORG/release-managers @ORG/training

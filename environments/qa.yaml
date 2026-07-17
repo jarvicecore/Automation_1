@@ -1,0 +1,8 @@
+# Managed by the pipeline. Do not edit by hand -- use the Promote workflow.
+# release_tag is the single source of truth for what qa is running.
+environment: qa
+release_tag: ""
+artifact_sha256: ""
+promoted_from: ""
+promoted_by: ""
+promoted_at: ""

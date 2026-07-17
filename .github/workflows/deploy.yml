@@ -1,0 +1,112 @@
+
+# Deploy -- reacts to a merged promotion PR.
+#
+# Merging a promotion PR changes exactly one file: environments/<env>.yaml.
+# This workflow notices which manifest moved and deploys that environment to the
+# release tag the manifest now names.
+#
+# dev is intentionally NOT in the trigger paths -- dev is deployed directly by
+# release.yml and has no manifest file at all (see environments/promotion-path.yaml).
+# dev always runs the latest GitHub Release by definition, so there is nothing
+# for this workflow to detect or react to for it.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'environments/qa.yaml'
+      - 'environments/stage.yaml'
+      - 'environments/uat.yaml'
+      - 'environments/prod.yaml'
+      - 'environments/train.yaml'
+
+permissions: {}
+
+jobs:
+  detect:
+    name: Detect promoted environments
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      any: ${{ steps.detect.outputs.any }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      # "yq" names two different, incompatible tools: mikefarah/yq (Go, what
+      # the expressions below are written for) and kislyuk/yq (a Python
+      # jq-wrapper of the same name, present on some distros/images). The
+      # latter doesn't error on this syntax -- it just returns wrong values --
+      # which is worse than "not found." So this checks the version banner,
+      # not just presence. Confirmed present on GitHub-hosted Ubuntu runners
+      # today via the runner-images tool manifest; this guard exists so a
+      # future image change fails loudly here instead of silently corrupting
+      # the manifest-diff loop below.
+      - name: Verify required tooling
+        run: |
+          if ! command -v yq >/dev/null 2>&1 || ! yq --version 2>&1 | grep -q mikefarah; then
+            echo "::error::mikefarah/yq (Go) is required to parse environment manifests."
+            echo "::error::Found on PATH: $(yq --version 2>&1 || echo 'yq not found')"
+            exit 1
+          fi
+
+      - id: detect
+        name: Diff environment manifests
+        run: |
+          set -euo pipefail
+
+          changed="$(git diff --name-only HEAD^ HEAD -- environments/ || true)"
+          include='[]'
+
+          for f in $changed; do
+            case "$f" in
+              environments/dev.yaml|environments/promotion-path.yaml) continue ;;
+              environments/*.yaml) ;;
+              *) continue ;;
+            esac
+            [ -f "$f" ] || continue
+
+            env_name="$(yq -r '.environment' "$f")"
+            tag="$(yq -r '.release_tag' "$f")"
+            digest="$(yq -r '.artifact_sha256' "$f")"
+
+            if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+              echo "::warning::${f} has no release_tag; skipping."
+              continue
+            fi
+
+            include="$(echo "$include" | jq -c \
+              --arg e "$env_name" --arg t "$tag" --arg d "$digest" \
+              '. + [{environment:$e, tag:$t, digest:$d}]')"
+          done
+
+          count="$(echo "$include" | jq 'length')"
+          echo "matrix={\"include\":${include}}" >> "$GITHUB_OUTPUT"
+          echo "any=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "Detected ${count} environment(s) to deploy."
+
+  deploy:
+    name: Deploy
+    needs: detect
+    if: needs.detect.outputs.any == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    uses: ./.github/workflows/_deploy.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: read
+      deployments: write
+    secrets: inherit
+    with:
+      environment: ${{ matrix.environment }}
+      release-tag: ${{ matrix.tag }}
+      artifact-sha256: ${{ matrix.digest }}

@@ -1,0 +1,153 @@
+
+# Reusable environment deployment.
+#
+# Pulls a previously-built artifact from its GitHub Release, cryptographically
+# verifies it was produced by this repo's build workflow, then hands it to the
+# environment-specific deploy hook.
+#
+# There is deliberately NO build step here. If you find yourself wanting to add
+# one, the promotion model is broken -- the bits that were tested in QA must be
+# the identical bits that land in Prod.
+
+name: _deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Target GitHub Environment (dev|qa|stage|uat|prod|train).
+        required: true
+        type: string
+      release-tag:
+        description: Git tag of the release whose artifact is being deployed.
+        required: true
+        type: string
+      artifact-sha256:
+        description: Expected SHA256 of the artifact. Deployment aborts on mismatch.
+        required: true
+        type: string
+      runner:
+        required: false
+        type: string
+        default: ubuntu-latest
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
+
+    # Binds the job to the GitHub Environment, which is where the human approval
+    # gates, wait timers and per-environment secrets live. The job pauses here
+    # until required reviewers approve.
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ vars.ENVIRONMENT_URL }}
+
+    permissions:
+      contents: read
+      id-token: write        # OIDC federation to the target platform. No static creds.
+      attestations: read
+      deployments: write
+
+    # Never let two deploys race into the same environment. Queue, don't cancel:
+    # cancelling a half-finished prod deploy is worse than waiting.
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download release artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release-tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$TAG" --dir dist --pattern '*.tar.gz'
+          ls -la dist
+
+      # Gate 1 -- integrity. The artifact must be bit-for-bit what the promotion
+      # manifest says was approved upstream.
+      - name: Verify digest matches promotion manifest
+        env:
+          EXPECTED: ${{ inputs.artifact-sha256 }}
+        run: |
+          set -euo pipefail
+          file="$(ls dist/*.tar.gz | head -n1)"
+          actual="$(sha256sum "$file" | cut -d' ' -f1)"
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error::Digest mismatch. Manifest expects ${EXPECTED} but release contains ${actual}."
+            echo "::error::The release asset was altered after promotion was approved. Refusing to deploy."
+            exit 1
+          fi
+          echo "Digest verified: ${actual}"
+
+      # Gate 2 -- provenance. Proves the artifact came out of _build.yml in THIS
+      # repository, on a protected ref. A tarball uploaded by hand to the release
+      # has no attestation and dies here.
+      - name: Verify build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          file="$(ls dist/*.tar.gz | head -n1)"
+          gh attestation verify "$file" \
+            --repo "${{ github.repository }}" \
+            --signer-workflow "${{ github.repository }}/.github/workflows/_build.yml"
+          echo "Provenance verified against ${{ github.repository }}/.github/workflows/_build.yml"
+
+      # ----------------------------------------------------------------------
+      # Deploy hook. This is the seam you own -- see scripts/deploy.sh.
+      # Per-environment configuration arrives as GitHub Environment secrets/vars,
+      # so the same code path serves all six environments.
+      # ----------------------------------------------------------------------
+      - name: Deploy
+        env:
+          TARGET_ENV: ${{ inputs.environment }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          ARTIFACT_SHA256: ${{ inputs.artifact-sha256 }}
+          EXTRACT_TARGET: ${{ vars.EXTRACT_TARGET }}
+          EXTRACT_CREDENTIALS: ${{ secrets.EXTRACT_CREDENTIALS }}
+        run: ./scripts/deploy.sh "$TARGET_ENV"
+
+      # ARTIFACT_SHA256 and SMOKE_URL must both be passed here, not just to the
+      # deploy step. Without ARTIFACT_SHA256 the smoke test can only check that the
+      # service is internally self-consistent -- it could be perfectly consistent
+      # about the WRONG release. Without SMOKE_URL it has nothing to probe and
+      # degrades to a no-op. Either omission makes the check quietly inert.
+      - name: Smoke test
+        env:
+          TARGET_ENV: ${{ inputs.environment }}
+          ARTIFACT_SHA256: ${{ inputs.artifact-sha256 }}
+          EXTRACT_TARGET: ${{ vars.EXTRACT_TARGET }}
+          SMOKE_URL: ${{ vars.SMOKE_URL || vars.ENVIRONMENT_URL }}
+        run: ./scripts/smoke-test.sh "$TARGET_ENV"
+
+      - name: Record deployment
+        env:
+          TARGET_ENV: ${{ inputs.environment }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          DIGEST: ${{ inputs.artifact-sha256 }}
+        run: |
+          {
+            echo "## Deployed to \`${TARGET_ENV}\`"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Release | \`${RELEASE_TAG}\` |"
+            echo "| Digest | \`${DIGEST}\` |"
+            echo "| Actor | @${{ github.actor }} |"
+            echo "| Provenance | verified |"
+          } >> "$GITHUB_STEP_SUMMARY"

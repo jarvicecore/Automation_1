@@ -1,0 +1,72 @@
+# Six long-lived environments, on your laptop.
+#
+# Each container is a deployment TARGET, not an application. They come up empty
+# and idle until scripts/deploy.sh installs a promoted artifact into them --
+# which is precisely how a real environment behaves, and why this rig is a fair
+# test rather than a demo that flatters itself.
+#
+#   docker compose up -d --build     bring the six environments up
+#   ./scripts/demo.sh                build once, promote through all six
+#   docker compose down -v           tear it all down
+#
+# dev  :8081   qa    :8082   stage :8083
+# uat  :8084   prod  :8085   train :8086
+
+name: automation1
+
+x-environment: &env-defaults
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  image: automation1-env:local
+  restart: unless-stopped
+  # The app writes nothing and needs no privileges. Say so, and mean it.
+  read_only: false
+  security_opt:
+    - no-new-privileges:true
+  healthcheck:
+    # Note this probes /healthz, NOT /version. /version returns 409 when the
+    # service cannot prove its provenance, and an unverified service SHOULD be
+    # reachable-but-failing so you can inspect it -- not invisible.
+    test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz')\""]
+    interval: 10s
+    timeout: 3s
+    retries: 3
+    start_period: 5s
+
+services:
+  dev:
+    <<: *env-defaults
+    container_name: automation1-dev
+    environment: { ENV_NAME: dev }
+    ports: ["8081:8000"]
+
+  qa:
+    <<: *env-defaults
+    container_name: automation1-qa
+    environment: { ENV_NAME: qa }
+    ports: ["8082:8000"]
+
+  stage:
+    <<: *env-defaults
+    container_name: automation1-stage
+    environment: { ENV_NAME: stage }
+    ports: ["8083:8000"]
+
+  uat:
+    <<: *env-defaults
+    container_name: automation1-uat
+    environment: { ENV_NAME: uat }
+    ports: ["8084:8000"]
+
+  prod:
+    <<: *env-defaults
+    container_name: automation1-prod
+    environment: { ENV_NAME: prod }
+    ports: ["8085:8000"]
+
+  train:
+    <<: *env-defaults
+    container_name: automation1-train
+    environment: { ENV_NAME: train }
+    ports: ["8086:8000"]
