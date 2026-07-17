@@ -110,5 +110,12 @@ is pinned by digest for the same reason.
   showing environments being promoted through, not stalled indefinitely
   behind `dev`.
 - Security tab with zero unaddressed `critical`/`high` alerts.
+- Dependabot PRs get triaged and merged (or explicitly deferred with a
+  reason), not left to accumulate — an open Dependabot PR for a real
+  vulnerability is a gap in the supply-chain story the rest of this repo
+  tells, not a background chore. See
+  [the dependency-vulnerability use case](USE_CASES.md#responding-to-a-dependency-vulnerability)
+  for the verification standard to hold a fix to before merging it, not
+  just the advisory it merged.
 - `docker compose up -d --build && ./scripts/demo.sh` succeeding locally —
   a useful smoke test for the pipeline's own scripts independent of GitHub.

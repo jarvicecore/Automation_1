@@ -134,10 +134,15 @@ fully-configured behavior.
    as a single `ci-passed` check regardless of how many jobs ran
    underneath — see [ADR pattern in ARCHITECTURE.md](ARCHITECTURE.md#trust-boundaries-and-permissions)
    for why aggregating matters.
-3. Merge. Watch the **Release** workflow run in the Actions tab: it builds
+3. Check for a **Copilot code review** on the PR itself — it comments
+   automatically and has caught real issues here before. It's advisory,
+   not a required check, so treat its comments the way you'd treat a
+   human reviewer's: read them, fix what's real, and don't assume silence
+   means the PR is clean.
+4. Merge. Watch the **Release** workflow run in the Actions tab: it builds
    once, attests provenance, publishes a GitHub Release (tag `v0.1.<run>`),
    and deploys `dev` automatically.
-4. Open the new release under the repo's **Releases** tab. It carries the
+5. Open the new release under the repo's **Releases** tab. It carries the
    artifact, a `.sha256` digest file, and a CycloneDX SBOM. Note the line
    in the release notes showing how to verify its attestation with
    `gh attestation verify`.

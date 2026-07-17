@@ -1,6 +1,6 @@
 # Use cases
 
-Five situations this pipeline is built to handle, told from the perspective
+Six situations this pipeline is built to handle, told from the perspective
 of the person living through them. For the mechanics behind each, see
 [`docs/ARCHITECTURE.md`](ARCHITECTURE.md); for the exact commands, see
 [`docs/WALKTHROUGH.md`](WALKTHROUGH.md).
@@ -135,3 +135,38 @@ tag it's running, and when it was last promoted. A large gap between what
 only ever grows is an early signal that the promotion process is being
 bypassed under pressure rather than used, which is worth knowing before an
 incident forces the question, not during one.
+
+## Responding to a dependency vulnerability
+
+**You're triaging a Dependabot alert.** A push to `main` prints
+`GitHub found 1 vulnerability (1 moderate)` — GitHub found something in a
+dependency already in the tree, not in what you just changed.
+
+Dependabot's alert links to a specific package and severity, but not
+automatically to a fix — that arrives separately as its own PR once
+Dependabot resolves one. In this repo's case: `requirements.txt` pinned
+`fastapi==0.115.6`, which resolves `starlette==0.41.3` — vulnerable to
+[GHSA-86qp-5c8j-p5mr](https://github.com/advisories/GHSA-86qp-5c8j-p5mr)
+("BadHost", CVE-2026-48710, CVSS 6.5): an unvalidated `Host` header can
+desync `request.url.path` from the path actually routed, letting a crafted
+header bypass path-based checks in middleware or endpoints. A Dependabot PR
+bumping `fastapi` to a version requiring a patched Starlette was already
+open in the `prod-minor-patch` group (see
+[`.github/dependabot.yml`](../.github/dependabot.yml)).
+
+Before merging a dependency bump — even a Dependabot-authored one — verify
+it actually closes the gap and doesn't break anything, the same "verified,
+not assumed" standard the rest of this pipeline holds itself to:
+
+1. Confirm the new pin actually resolves past the vulnerable range (`pip
+   install --dry-run` and read what it resolves, don't take the advisory's
+   word for what a version bump implies).
+2. Run the full test suite against the new versions.
+3. For a server dependency specifically, boot the real app and hit its
+   endpoints over actual HTTP — a test client alone doesn't exercise the
+   server's own startup path.
+
+Only then merge. `dependency-review` and CodeQL already ran on the PR
+automatically; this is the verification layer neither of them does for
+you — they tell you a PR is safe to merge in isolation, not that the
+specific fix you're relying on actually lands.
