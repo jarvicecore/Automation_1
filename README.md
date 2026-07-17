@@ -108,6 +108,8 @@ Read this before you start — some of it is already done.
 | Promotion GitHub App | ❌ not created — promotion PRs get **no checks** until it is |
 | Snyk / SonarQube | ❌ off (flag-gated; pipeline is green without them) |
 | `deploy.sh` | ⚠️ real for the Docker rig; **stub for your real target** — see [step 6](#6-point-deploysh-at-your-real-target) |
+| `tools/reposentry` (in-house secrets/hygiene scanner) | ✅ integrated into `_security.yml`, 20 tests of its own |
+| `LICENSE` | ✅ MIT |
 
 ---
 
@@ -356,8 +358,13 @@ docker/
   entrypoint.sh            Idles until a release is deployed into it
 docker-compose.yml         Six environments, ports 8081–8086
 
+tools/reposentry/          In-repo secret/hygiene scanner, run by _security.yml.
+                           Deliberately its own package — see design decisions —
+                           so it never ends up inside the promoted artifact.
+
 VERSION                    Version base. Full version = <base>.<run_number>
 sonar-project.properties
+LICENSE
 .gitattributes             Forces LF on .sh — prevents $'\r' failures on runners
 ```
 
@@ -365,7 +372,7 @@ sonar-project.properties
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| **CI** | `pull_request` → main, `merge_group` | Build (no publish), test, CodeQL, dependency review, Snyk, Sonar. Ends in `ci-passed`. |
+| **CI** | `pull_request` → main, `merge_group` | Build (no publish), test, CodeQL, dependency review, Snyk, Sonar, `reposentry`. Ends in `ci-passed`. |
 | **Release** | `push` → main *(ignores `environments/**`, `docs/**`, `*.md`)* | Builds **once**, attests provenance, publishes a GitHub Release, auto-deploys dev. |
 | **Promote** | `workflow_dispatch` | Verifies digest + provenance, opens a promotion PR. |
 | **Deploy** | `push` → main touching `environments/{qa,stage,uat,prod,train}.yaml` | Detects which manifest moved; deploys that environment. |
@@ -376,7 +383,7 @@ Reusable (`_`-prefixed, called by the above):
 | Workflow | Purpose |
 | --- | --- |
 | **_build** | harden-runner → checkout → Python 3.12 → `build.sh` → `test.sh` → digest → SBOM → **attest** (release only) → upload. |
-| **_security** | CodeQL matrix, dependency review, Snyk, SonarQube, plus a `gate` job that aggregates them. |
+| **_security** | CodeQL matrix, dependency review, Snyk, SonarQube, `reposentry` (secrets/large-files/hygiene), plus a `gate` job that aggregates them. |
 | **_deploy** | Downloads the release asset, verifies digest, verifies attestation, runs `deploy.sh` + `smoke-test.sh`. Bound to the GitHub Environment, so approval gates apply. |
 
 **Why `ci-passed` and `gate` exist.** Required status checks are brittle when pointed
@@ -534,6 +541,12 @@ AGPL/GPL); secret scanning **with push protection**, which rejects the push cont
 a credential rather than alerting after it has leaked; Dependabot across
 `github-actions`, `pip` and `docker`; OpenSSF Scorecard nightly.
 
+**In-house.** `tools/reposentry`, a small dependency-free scanner run in the
+security gate: a narrower, faster secrets check than GitHub's (useful as a
+second, independent pass), plus large-file and repo-hygiene checks. Kept as
+its own package, never imported by `src/app`, so nothing pipeline-side ever
+rides along inside the artifact that gets promoted.
+
 **Commercial.** Snyk (SCA + SAST) and SonarQube with a quality gate. Flag-gated, so
 the pipeline is green until licences land. All scanners emit SARIF into a single
 Security tab, enforced by a single ruleset.
@@ -575,6 +588,16 @@ reads. A PR is reviewable, blameable, revertable, and lets CODEOWNERS enforce
 never `date`. An earlier version used the wall clock and produced a different digest
 on every rebuild — which would silently make the digests in promotion manifests
 unverifiable. This is the single easiest way to hollow the system out; guard it.
+`tar`'s own metadata (mtime, ownership, entry order) isn't the whole story either —
+its built-in `-z` pipes through a `gzip` that embeds its own header timestamp, so
+`build.sh` pipes through `gzip -n` explicitly instead. Verified by building the same
+commit twice across a real clock gap and diffing the digests.
+
+**Pipeline tooling lives outside `src/`.** `tools/reposentry` is never imported by
+`src/app` and is never on the path `build.sh` packages. The promotion model's whole
+guarantee is that the bytes QA approved are the bytes Prod runs; a scanner used *to
+build* the pipeline has no business riding along *inside* the artifact the pipeline
+produces.
 
 **Scanners are `continue-on-error`, but their findings still block.** A scanner
 outage should not wedge the pipeline, so the scan *step* tolerates failure — but the

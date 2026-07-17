@@ -19,9 +19,11 @@ These are enforced by the pipeline, not by convention:
 | Build provenance (SLSA) attested | `_build.yml` |
 | Provenance **verified before every deploy** | `_deploy.yml` — an unattested artifact cannot reach any environment |
 | Artifact digest pinned through promotion | `environments/*.yaml` |
+| SBOM (CycloneDX) generated on every build | `_build.yml` |
 | SAST | CodeQL (`security-extended`), Snyk Code |
 | SCA | Dependabot, dependency review, Snyk Open Source |
-| Secret detection | GitHub secret scanning + push protection |
+| Secret detection | GitHub secret scanning + push protection, `reposentry` in the security gate |
+| Repo hygiene (missing README/LICENSE, oversized files) | `reposentry` in the security gate |
 | Code quality gate | SonarQube |
 | Posture grading | OpenSSF Scorecard, nightly |
 | Human approval per environment | GitHub Environments + CODEOWNERS |

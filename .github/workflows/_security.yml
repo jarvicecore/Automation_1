@@ -195,13 +195,60 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
+  repo-hygiene:
+    name: Repo hygiene (reposentry)
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tools/reposentry/pyproject.toml
+
+      - name: Install reposentry
+        run: pip install -e "tools/reposentry[dev]"
+
+      - name: Run reposentry's own test suite
+        run: pytest -q tools/reposentry/tests
+        env:
+          PYTHONPATH: tools/reposentry/src
+
+      # tools/reposentry/tests intentionally contains synthetic secret-shaped
+      # strings to exercise the detectors -- excluded here for the same reason
+      # a scanner's own test fixtures are excluded from gitleaks/CodeQL runs
+      # elsewhere in this repo.
+      - name: Scan repository
+        run: |
+          reposentry . \
+            --checks secrets large-files hygiene \
+            --exclude tools/reposentry/tests \
+            --format markdown \
+            --fail-on error \
+            --github-step-summary
+
   # A single check to put in branch protection. Required checks are brittle when
   # they point at matrixed / conditional jobs, because a skipped job never reports.
   # This aggregator always reports, and fails if any gate genuinely failed.
   gate:
     name: Security gate
     if: always()
-    needs: [codeql, dependency-review, snyk, sonarqube]
+    needs: [codeql, dependency-review, snyk, sonarqube, repo-hygiene]
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 5
     permissions: {}
