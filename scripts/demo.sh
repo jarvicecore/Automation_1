@@ -13,7 +13,7 @@
 # That is binary promotion, and you can see it rather than take it on faith.
 #
 # This is the local half. The GitHub half (approval gates, CODEOWNERS, SLSA
-# attestation, promotion PRs) runs on the server -- see docs/PIPELINE.md.
+# attestation, promotion PRs) runs on the server -- see docs/WALKTHROUGH.md.
 
 set -euo pipefail
 
