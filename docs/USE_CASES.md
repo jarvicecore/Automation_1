@@ -142,17 +142,17 @@ incident forces the question, not during one.
 `GitHub found 1 vulnerability (1 moderate)` — GitHub found something in a
 dependency already in the tree, not in what you just changed.
 
-Dependabot's alert links to a specific package and severity, but not
-automatically to a fix — that arrives separately as its own PR once
-Dependabot resolves one. In this repo's case: `requirements.txt` pinned
-`fastapi==0.115.6`, which resolves `starlette==0.41.3` — vulnerable to
+This actually happened here, and is worth walking through as a completed
+incident rather than a hypothetical. At the time, `requirements.txt` pinned
+`fastapi==0.115.6`, which resolved `starlette==0.41.3` — vulnerable to
 [GHSA-86qp-5c8j-p5mr](https://github.com/advisories/GHSA-86qp-5c8j-p5mr)
-("BadHost", CVE-2026-48710, CVSS 6.5): an unvalidated `Host` header can
+("BadHost", CVE-2026-48710, CVSS 6.5): an unvalidated `Host` header could
 desync `request.url.path` from the path actually routed, letting a crafted
-header bypass path-based checks in middleware or endpoints. A Dependabot PR
-bumping `fastapi` to a version requiring a patched Starlette was already
-open in the `prod-minor-patch` group (see
-[`.github/dependabot.yml`](../.github/dependabot.yml)).
+header bypass path-based checks in middleware or endpoints. Dependabot's
+alert links to the package and severity, but not automatically to a fix —
+that arrives separately as its own PR once Dependabot resolves one; here,
+a PR bumping `fastapi` was already open in the `prod-minor-patch` group
+(see [`.github/dependabot.yml`](../.github/dependabot.yml)).
 
 Before merging a dependency bump — even a Dependabot-authored one — verify
 it actually closes the gap and doesn't break anything, the same "verified,
@@ -167,6 +167,10 @@ not assumed" standard the rest of this pipeline holds itself to:
    server's own startup path.
 
 Only then merge. `dependency-review` and CodeQL already ran on the PR
-automatically; this is the verification layer neither of them does for
-you — they tell you a PR is safe to merge in isolation, not that the
-specific fix you're relying on actually lands.
+automatically; this verification is what neither of them does for you —
+they confirm a PR is safe to merge in isolation, not that the specific fix
+it claims to contain actually resolves the alert.
+
+**Current state:** `requirements.txt` now pins `fastapi==0.139.2`, which
+requires `starlette>=0.46.0` (resolves to `1.3.1`) — past the `1.0.1` fix.
+Resolved.

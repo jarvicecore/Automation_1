@@ -26,7 +26,7 @@ These are enforced by the pipeline, not by convention:
 | Repo hygiene (missing README/LICENSE, oversized files) | `reposentry` in the security gate |
 | Code quality gate | SonarQube |
 | Posture grading | OpenSSF Scorecard, nightly |
-| Automated PR review | GitHub Copilot code review — advisory, not a required check; see note below |
+| Automated PR review | GitHub Copilot code review — advisory, not a required check; see [what this actually means](#what-leveraging-copilot-actually-means-here) |
 | Human approval per environment | GitHub Environments + CODEOWNERS |
 
 ## What "leveraging Copilot" actually means here
