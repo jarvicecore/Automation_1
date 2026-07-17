@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Keep runtime/dev Python dependencies current.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  # Keep pinned GitHub Actions SHAs current — Dependabot resolves the tag
+  # a SHA corresponds to and opens a PR bumping it, so pinning to a commit
+  # (see docs/adr/0001) doesn't mean updates have to be done by hand.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10

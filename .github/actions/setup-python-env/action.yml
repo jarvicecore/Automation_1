@@ -1,0 +1,25 @@
+name: "Setup Python environment"
+description: >
+  Installs Python with pip caching and installs the project in editable mode
+  with dev extras. Centralizes environment setup so every workflow gets the
+  same caching and install behavior instead of duplicating it per-job.
+  Callers are expected to have already run actions/checkout.
+
+inputs:
+  python-version:
+    description: "Python version to install (e.g. 3.12)."
+    required: false
+    default: "3.12"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: "pip"
+
+    - name: Install project (editable, with dev extras)
+      shell: bash
+      run: pip install -e ".[dev]"

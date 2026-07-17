@@ -1,0 +1,74 @@
+# Reusable workflow: lint + type-check + test a given Python version.
+#
+# Called from ci.yml once per matrix entry via `uses:`, instead of every
+# caller duplicating the same five steps. This is the pattern an enterprise
+# org would extract once the same test sequence starts appearing in three or
+# more workflows (release verification, nightly builds, PR checks, etc.).
+name: Reusable · Python test suite
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: "Python version to run the suite against."
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (py${{ inputs.python-version }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Format check (ruff format)
+        run: ruff format --check src tests
+
+      - name: Type check (mypy)
+        run: mypy
+
+      - name: Test (pytest)
+        run: pytest --junitxml=pytest-report.xml
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "### Test results — Python ${{ inputs.python-version }}"
+            echo
+            if [ -f pytest-report.xml ]; then
+              python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("pytest-report.xml").getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          attrs = suite.attrib
+          print(f"- tests: {attrs.get('tests', '?')}")
+          print(f"- failures: {attrs.get('failures', '?')}")
+          print(f"- errors: {attrs.get('errors', '?')}")
+          print(f"- skipped: {attrs.get('skipped', '?')}")
+          print(f"- time: {attrs.get('time', '?')}s")
+          PY
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage & test reports
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-reports-py${{ inputs.python-version }}
+          path: |
+            coverage.xml
+            pytest-report.xml
+          retention-days: 14

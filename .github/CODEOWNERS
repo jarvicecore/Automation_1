@@ -1,0 +1,5 @@
+# Require review from the repo owner on all changes.
+# Replace with real team/user handles before enabling required-review
+# branch protection — a single-owner CODEOWNERS file is a placeholder,
+# not a substitute for a second set of eyes on production changes.
+* @jarvicecore
