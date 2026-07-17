@@ -58,12 +58,19 @@ EOF
 # Deterministic tar: fixed mtime, sorted entries, no owner metadata. Without
 # this the digest changes on every build and "promote this exact digest"
 # becomes meaningless.
+#
+# gzip itself is not exempt: tar's built-in -z pipes through a gzip that embeds
+# its own header timestamp (and, depending on version, the source filename),
+# which would make the compressed bytes differ between builds even though the
+# uncompressed tar is identical. Piping through `gzip -n` explicitly suppresses
+# that header metadata so the final .tar.gz is bit-for-bit reproducible too.
 tar \
   --sort=name \
   --mtime='UTC 2020-01-01' \
   --owner=0 --group=0 --numeric-owner \
   --format=gnu \
-  -czf "dist/${NAME}-${VERSION}.tar.gz" \
-  -C build "${NAME}"
+  -cf - \
+  -C build "${NAME}" \
+  | gzip -n > "dist/${NAME}-${VERSION}.tar.gz"
 
 echo "==> Wrote dist/${NAME}-${VERSION}.tar.gz"

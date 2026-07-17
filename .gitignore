@@ -3,3 +3,13 @@ build/
 *.tar.gz
 *.sarif
 .scannerwork/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.coverage
+coverage.xml
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

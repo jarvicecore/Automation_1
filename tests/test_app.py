@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-import tarfile
-import io
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app import extract, provenance

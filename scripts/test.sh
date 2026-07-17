@@ -27,7 +27,11 @@ for f in scripts/*.sh docker/*.sh; do
 done
 
 echo "--> environment manifests are well-formed"
-if command -v yq >/dev/null 2>&1; then
+# "yq" names two different, incompatible tools -- mikefarah/yq (Go, what the
+# expression below is written for) and kislyuk/yq (a Python jq-wrapper of the
+# same name). The latter doesn't error on this syntax, it just returns wrong
+# values, so presence alone ("command -v yq") is not enough to trust it.
+if command -v yq >/dev/null 2>&1 && yq --version 2>&1 | grep -q mikefarah; then
   for f in environments/*.yaml; do
     yq -e 'type == "!!map"' "$f" >/dev/null || {
       echo "    ${f} is not a valid YAML mapping"
@@ -35,7 +39,8 @@ if command -v yq >/dev/null 2>&1; then
     }
   done
 else
-  echo "::warning::yq not installed -- skipping manifest checks."
+  echo "::warning::mikefarah/yq not found on PATH -- skipping manifest checks."
+  echo "::warning::(found instead: $(yq --version 2>&1 || echo 'nothing'))"
 fi
 
 if [ "$failures" -gt 0 ]; then

@@ -79,6 +79,23 @@ jobs:
         with:
           persist-credentials: false
 
+      # "yq" names two different, incompatible tools: mikefarah/yq (Go, what
+      # the expressions below are written for) and kislyuk/yq (a Python
+      # jq-wrapper of the same name, present on some distros/images). The
+      # latter doesn't error on this syntax -- it just returns wrong values --
+      # which is worse than "not found." So this checks the version banner,
+      # not just presence. Confirmed present on GitHub-hosted Ubuntu runners
+      # today via the runner-images tool manifest; this guard exists so a
+      # future image change fails loudly here instead of silently corrupting
+      # the drift report below.
+      - name: Verify required tooling
+        run: |
+          if ! command -v yq >/dev/null 2>&1 || ! yq --version 2>&1 | grep -q mikefarah; then
+            echo "::error::mikefarah/yq (Go) is required to parse environment manifests."
+            echo "::error::Found on PATH: $(yq --version 2>&1 || echo 'yq not found')"
+            exit 1
+          fi
+
       # Surfaces how far Prod has fallen behind Dev. A pipeline nobody promotes
       # through is a pipeline that will get bypassed under pressure, so the drift
       # number is an early warning about the process, not just the code.
