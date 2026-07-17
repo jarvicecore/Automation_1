@@ -50,7 +50,7 @@ than quietly serving traffic. Prove it:
 ```bash
 docker exec -u root automation1-prod sh -c 'echo tampered >> /opt/app/artifact.tar.gz'
 docker restart automation1-prod && sleep 3
-./scripts/smoke-test.sh prod        # exits 1 — deployment blocked
+EXTRACT_TARGET=docker://automation1-prod ./scripts/smoke-test.sh prod   # exits 1 — deployment blocked
 ```
 
 Re-run `./scripts/demo.sh` to restore it; `docker compose down -v` to tear
