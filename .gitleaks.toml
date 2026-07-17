@@ -1,0 +1,11 @@
+title = "gitleaks config for Automation_1"
+
+[extend]
+# Layer on top of gitleaks' default rule set rather than replacing it.
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic secrets used as fixtures for reposentry's own secret-detection tests — not real credentials."
+paths = [
+  '''^tests/.*''',
+]
