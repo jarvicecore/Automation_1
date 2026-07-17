@@ -99,7 +99,7 @@ Full annotated layout, workflow-by-workflow reference, and endpoint docs:
 | | |
 | --- | --- |
 | [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md) | How it's built — components, diagrams, trust boundaries, the three-gate verification model. |
-| [**docs/USE_CASES.md**](docs/USE_CASES.md) | Concrete scenarios: shipping a change, promoting, rolling back, catching tampering, drift. |
+| [**docs/USE_CASES.md**](docs/USE_CASES.md) | Concrete scenarios: shipping a change, promoting, rolling back, catching tampering, drift, patching a CVE. |
 | [**docs/WALKTHROUGH.md**](docs/WALKTHROUGH.md) | Hands-on, step by step — locally and on GitHub. |
 | [**docs/SETUP.md**](docs/SETUP.md) | Cold start to a fully configured, enforced pipeline. |
 | [**docs/OPERATIONS.md**](docs/OPERATIONS.md) | Configuration reference and troubleshooting. |
