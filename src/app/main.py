@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from . import extract, provenance
 
 app = FastAPI(
-    title="Automation_1 extract service",
+    title="Secure Release Pipeline extract service",
     description="Hello, World, with a verifiable chain of custody.",
 )
 

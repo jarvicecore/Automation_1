@@ -77,7 +77,7 @@ def _fake_deployment(tmp_path, expected_digest: str, actual_bytes: bytes):
     root = tmp_path / "current"
     root.mkdir()
     (root / "BUILDINFO").write_text(
-        "name=automation1\nversion=1.2.3\ncommit=abc123\nbuilt_at=2026-01-01T00:00:00Z\n"
+        "name=secure-release-pipeline\nversion=1.2.3\ncommit=abc123\nbuilt_at=2026-01-01T00:00:00Z\n"
     )
     (root / "RUNTIME").write_text(
         f"environment=qa\nrelease_tag=v1.2.3\nartifact_sha256={expected_digest}\n"

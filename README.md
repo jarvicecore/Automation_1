@@ -1,4 +1,4 @@
-# Automation_1
+# secure-release-pipeline
 
 Enterprise CI/CD on GitHub Actions for a data-extract workload, built on one
 rule:
@@ -48,9 +48,9 @@ service can't prove its own identity, so it fails its own deployment rather
 than quietly serving traffic. Prove it:
 
 ```bash
-docker exec -u root automation1-prod sh -c 'echo tampered >> /opt/app/artifact.tar.gz'
-docker restart automation1-prod && sleep 3
-EXTRACT_TARGET=docker://automation1-prod ./scripts/smoke-test.sh prod   # exits 1 — deployment blocked
+docker exec -u root secure-release-pipeline-prod sh -c 'echo tampered >> /opt/app/artifact.tar.gz'
+docker restart secure-release-pipeline-prod && sleep 3
+EXTRACT_TARGET=docker://secure-release-pipeline-prod ./scripts/smoke-test.sh prod   # exits 1 — deployment blocked
 ```
 
 Re-run `./scripts/demo.sh` to restore it; `docker compose down -v` to tear

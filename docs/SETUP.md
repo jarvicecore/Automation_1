@@ -110,7 +110,7 @@ add:
 
 | Setting | Type | Purpose |
 | --- | --- | --- |
-| `EXTRACT_TARGET` | variable | Where this environment's artifact gets installed. `docker://automation1-qa` drives the local rig. |
+| `EXTRACT_TARGET` | variable | Where this environment's artifact gets installed. `docker://secure-release-pipeline-qa` drives the local rig. |
 | `ENVIRONMENT_URL` | variable | Optional — shown on the GitHub deployment record. |
 | `SMOKE_URL` | variable | Where `smoke-test.sh` probes. Inferred automatically for `docker://` targets. |
 | `EXTRACT_CREDENTIALS` | secret | Only if the target can't do OIDC — see below. |

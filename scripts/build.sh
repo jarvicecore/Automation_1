@@ -17,7 +17,7 @@ set -euo pipefail
 
 VERSION="${BUILD_VERSION:?BUILD_VERSION must be set}"
 SHA="${BUILD_SHA:-local}"
-NAME="automation1"
+NAME="secure-release-pipeline"
 
 echo "==> Building ${NAME} ${VERSION} (${SHA})"
 
