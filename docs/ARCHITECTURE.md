@@ -276,12 +276,12 @@ applications — see [`docker-compose.yml`](../docker-compose.yml).
 
 | Env | Port | Container |
 | --- | --- | --- |
-| dev | 8081 | `automation1-dev` |
-| qa | 8082 | `automation1-qa` |
-| stage | 8083 | `automation1-stage` |
-| uat | 8084 | `automation1-uat` |
-| prod | 8085 | `automation1-prod` |
-| train | 8086 | `automation1-train` |
+| dev | 8081 | `secure-release-pipeline-dev` |
+| qa | 8082 | `secure-release-pipeline-qa` |
+| stage | 8083 | `secure-release-pipeline-stage` |
+| uat | 8084 | `secure-release-pipeline-uat` |
+| prod | 8085 | `secure-release-pipeline-prod` |
+| train | 8086 | `secure-release-pipeline-train` |
 
 The image carries the Python runtime and pinned dependencies but **no
 application code** — code only ever arrives as the promoted tarball,

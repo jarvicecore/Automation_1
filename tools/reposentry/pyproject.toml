@@ -9,7 +9,7 @@ description = "In-repo pre-merge secret-leak and hygiene scanner, run as part of
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Automation_1 maintainers" }]
+authors = [{ name = "secure-release-pipeline maintainers" }]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",

@@ -109,8 +109,8 @@ and HTTP `409`, deliberately: "unknown" never counts as verified (see
 You can force this state on purpose, locally:
 
 ```bash
-docker exec -u root automation1-prod sh -c 'echo tampered >> /opt/app/artifact.tar.gz'
-docker restart automation1-prod
+docker exec -u root secure-release-pipeline-prod sh -c 'echo tampered >> /opt/app/artifact.tar.gz'
+docker restart secure-release-pipeline-prod
 curl -s http://localhost:8085/version   # self_verified: false, HTTP 409
 ```
 

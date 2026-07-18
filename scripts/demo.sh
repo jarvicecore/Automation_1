@@ -27,8 +27,8 @@ rule() { printf '%s\n' "--------------------------------------------------------
 
 # --- preflight --------------------------------------------------------------
 for e in "${ENVS[@]}"; do
-  if ! docker inspect "automation1-${e}" >/dev/null 2>&1; then
-    echo "Environment 'automation1-${e}' is not running."
+  if ! docker inspect "secure-release-pipeline-${e}" >/dev/null 2>&1; then
+    echo "Environment 'secure-release-pipeline-${e}' is not running."
     echo "Bring the rig up first:  docker compose up -d --build"
     exit 1
   fi
@@ -58,12 +58,12 @@ for e in "${ENVS[@]}"; do
 
   RELEASE_TAG="$RELEASE_TAG" \
   ARTIFACT_SHA256="$DIGEST" \
-  EXTRACT_TARGET="docker://automation1-${e}" \
+  EXTRACT_TARGET="docker://secure-release-pipeline-${e}" \
   TARGET_ENV="$e" \
     ./scripts/deploy.sh "$e"
 
   ARTIFACT_SHA256="$DIGEST" \
-  EXTRACT_TARGET="docker://automation1-${e}" \
+  EXTRACT_TARGET="docker://secure-release-pipeline-${e}" \
     ./scripts/smoke-test.sh "$e"
 done
 
@@ -98,6 +98,6 @@ for e in "${ENVS[@]}"; do
 done
 echo
 echo "Now try breaking it:"
-echo "  docker exec automation1-prod sh -c 'echo tampered >> /opt/app/artifact.tar.gz'"
-echo "  docker restart automation1-prod && sleep 3"
+echo "  docker exec secure-release-pipeline-prod sh -c 'echo tampered >> /opt/app/artifact.tar.gz'"
+echo "  docker restart secure-release-pipeline-prod && sleep 3"
 echo "  ./scripts/smoke-test.sh prod   # <- must FAIL"

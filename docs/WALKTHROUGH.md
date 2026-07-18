@@ -18,11 +18,11 @@ against a real repository. For what each piece is *for*, see
 
 ```bash
 git clone <this-repo>
-cd Automation_1
+cd secure-release-pipeline
 docker compose up -d --build
 ```
 
-Six containers start: `automation1-dev`, `-qa`, `-stage`, `-uat`, `-prod`,
+Six containers start: `secure-release-pipeline-dev`, `-qa`, `-stage`, `-uat`, `-prod`,
 `-train`, on ports 8081–8086. Each one carries the Python runtime and
 pinned dependencies but **no application code** — they idle, waiting for an
 artifact to be installed into them, exactly like a freshly provisioned
@@ -71,8 +71,8 @@ Watch the output. It does four things, in order:
 A verification step that can't fail is decoration. Prove this one can:
 
 ```bash
-docker exec -u root automation1-prod sh -c 'echo tampered >> /opt/app/artifact.tar.gz'
-docker restart automation1-prod
+docker exec -u root secure-release-pipeline-prod sh -c 'echo tampered >> /opt/app/artifact.tar.gz'
+docker restart secure-release-pipeline-prod
 sleep 3
 
 curl -s http://localhost:8085/version
@@ -83,7 +83,7 @@ Then run the same check the real pipeline runs after every deploy:
 
 ```bash
 ARTIFACT_SHA256="<the digest demo.sh printed>" \
-EXTRACT_TARGET=docker://automation1-prod \
+EXTRACT_TARGET=docker://secure-release-pipeline-prod \
   ./scripts/smoke-test.sh prod
 # exits 1 — this deploy would have been blocked
 ```

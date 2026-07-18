@@ -31,7 +31,7 @@ Settings → Environments → *(each of dev, qa, stage, uat, prod, train)*:
 
 | Setting | Type | Purpose |
 | --- | --- | --- |
-| `EXTRACT_TARGET` | variable | Where this environment's artifact gets installed. `docker://automation1-qa` drives the local rig. |
+| `EXTRACT_TARGET` | variable | Where this environment's artifact gets installed. `docker://secure-release-pipeline-qa` drives the local rig. |
 | `ENVIRONMENT_URL` | variable | Optional link shown on the GitHub deployment record. |
 | `SMOKE_URL` | variable | Where `smoke-test.sh` probes. Inferred for `docker://` targets. |
 | `EXTRACT_CREDENTIALS` | secret | Only if the target can't use OIDC. Prefer OIDC — see [ADR 0010](adr/0010-oidc-over-long-lived-deploy-credentials.md). |
