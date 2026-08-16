@@ -154,7 +154,7 @@ jobs:
       # continue-on-error purely so that a scanner outage cannot wedge the pipeline;
       # the resulting alerts still block merges via the code-scanning ruleset.
       - name: Upload Snyk SARIF
-        uses: github/codeql-action/upload-sarif@3599b3baa15b485a2e49ef411a7a4bb2452e7f93 # v3.30.5
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
         with:
           sarif_file: .
           category: snyk
