@@ -11,7 +11,7 @@
 
 # Pinned by digest, not by tag. `python:3.12-slim` is mutable and will silently
 # become a different image; this digest cannot.
-FROM python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
+FROM python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015
 
 # Dependencies are baked into the environment, not the artifact -- exactly as
 # they would be on a real host, and it keeps the promoted artifact small.
